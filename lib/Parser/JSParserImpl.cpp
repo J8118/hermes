@@ -134,6 +134,12 @@ void JSParserImpl::initializeIdentifiers() {
 
   // Flow Record syntax
   recordIdent_ = kw_.identRecord;
+
+  // Flow `writeonly` variance modifier (Flow-only counterpart to readonly).
+  writeonlyIdent_ = kw_.identWriteonly;
+
+  // Flow `out` type-parameter variance modifier (long-form spelling of `+T`).
+  outIdent_ = kw_.identOut;
 #endif
 
 #if HERMES_PARSE_TS
@@ -1903,7 +1909,11 @@ Optional<ESTree::Node *> JSParserImpl::parseForStatement(Param param) {
       if (!optIdent)
         return None;
       ESTree::NodeList declList;
-      declList.push_back(**optIdent);
+      auto *declarator = setLocation(
+          *optIdent,
+          *optIdent,
+          new (context_) ESTree::VariableDeclaratorNode(nullptr, *optIdent));
+      declList.push_back(*declarator);
 
       decl = setLocation(
           varStartLoc,
@@ -1923,7 +1933,11 @@ Optional<ESTree::Node *> JSParserImpl::parseForStatement(Param param) {
     if (!optIdent)
       return None;
     ESTree::NodeList declList;
-    declList.push_back(**optIdent);
+    auto *declarator = setLocation(
+        *optIdent,
+        *optIdent,
+        new (context_) ESTree::VariableDeclaratorNode(nullptr, *optIdent));
+    declList.push_back(*declarator);
 
     decl = setLocation(
         varStartLoc,
@@ -5361,10 +5375,10 @@ Optional<ESTree::Node *> JSParserImpl::parseClassElement(
             check(TokenKind::plus) ? plusIdent_ : minusIdent_));
     advance(JSLexer::GrammarContext::Type);
   } else if (
-      context_.getParseFlow() && check(readonlyIdent_) &&
-      canFollowReadonlyModifierFlow(lexer_.lookahead1(llvh::None))) {
+      context_.getParseFlow() && checkN(readonlyIdent_, writeonlyIdent_) &&
+      canFollowVarianceKeywordFlow(lexer_.lookahead1(llvh::None))) {
     variance = setLocation(
-        tok_, tok_, new (context_) ESTree::VarianceNode(readonlyIdent_));
+        tok_, tok_, new (context_) ESTree::VarianceNode(tok_->getIdentifier()));
     advance(JSLexer::GrammarContext::Type);
   }
 #endif

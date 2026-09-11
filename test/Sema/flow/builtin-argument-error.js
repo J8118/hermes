@@ -19,13 +19,10 @@ function testMap(arr: number[]): number[] {
 
 // Auto-generated content below. Please do not modify manually.
 
-// CHECK:{{.*}}builtin-argument-error.js:12:19: error: ft: function parameter 'pos' type mismatch
+// CHECK:{{.*}}builtin-argument-error.js:12:19: error: ft: function parameter 'pos' type mismatch: cannot assign string to number
 // CHECK-NEXT:  return s.charAt('b');
 // CHECK-NEXT:                  ^~~
 // CHECK-NEXT:{{.*}}builtin-argument-error.js:17:3: error: ft: return value incompatible with return type: cannot return class Array<string> as class Array<number>
 // CHECK-NEXT:  return arr.map((n: number): string => 'x', undefined);
 // CHECK-NEXT:  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// CHECK-NEXT:{{.*}}builtin-argument-error.js:17:10: error: ft: function expects at most 1 arguments, but 2 supplied
-// CHECK-NEXT:  return arr.map((n: number): string => 'x', undefined);
-// CHECK-NEXT:         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// CHECK-NEXT:Emitted 3 errors. exiting.
+// CHECK-NEXT:Emitted 2 errors. exiting.

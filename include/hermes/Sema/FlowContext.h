@@ -34,6 +34,7 @@ namespace flow {
   _HERMES_SEMA_FLOW_DEFKIND(Number)               \
   _HERMES_SEMA_FLOW_DEFKIND(BigInt)               \
   _HERMES_SEMA_FLOW_DEFKIND(Any)                  \
+  _HERMES_SEMA_FLOW_DEFKIND(Empty)                \
   _HERMES_SEMA_FLOW_DEFKIND(Mixed)
 
 #define _HERMES_SEMA_FLOW_COMPLEX_TYPES       \
@@ -247,6 +248,7 @@ using InferencePlaceholderType =
 
 using AnyType = SingleType<TypeKind::Any, SingletonType>;
 using MixedType = SingleType<TypeKind::Mixed, SingletonType>;
+using EmptyType = SingleType<TypeKind::Empty, SingletonType>;
 
 /// Unions are handled specially because their existence and layout is dependent
 /// on their arms.
@@ -464,6 +466,18 @@ class TupleType : public TypeInfo {
   }
 };
 
+/// Variance of a field in a structural type. Controls read/write permissions
+/// and how the field participates in subtyping.
+enum class FieldVariance : uint8_t {
+  /// Invariant: both read and write allowed; subtyping requires type equality.
+  None,
+  /// Covariant (Flow's `+`): read-only; subtyping is covariant in field type.
+  ReadOnly,
+  /// Contravariant (Flow's `-`): write-only; subtyping is contravariant in
+  /// field type.
+  WriteOnly,
+};
+
 /// A type representing an ordered, named list of fields in an object.
 /// ExactObject types with different field orders can't flow into each other.
 class ExactObjectType : public TypeInfo {
@@ -474,8 +488,25 @@ class ExactObjectType : public TypeInfo {
     Identifier name;
     /// The type of the field.
     Type *type;
+    /// Variance of this field (None == invariant).
+    FieldVariance variance;
 
-    Field(Identifier name, Type *type) : name(name), type(type) {}
+    Field(
+        Identifier name,
+        Type *type,
+        FieldVariance variance = FieldVariance::None)
+        : name(name), type(type), variance(variance) {}
+  };
+
+  /// An index signature, e.g. `[k: string]: number`. An exact object has at
+  /// most one indexer, and an object with an indexer has no named fields.
+  struct Indexer {
+    /// The type of the key (e.g. string or number).
+    Type *keyType;
+    /// The type of the value.
+    Type *valueType;
+    /// Variance of the indexer (None == invariant).
+    FieldVariance variance;
   };
 
  private:
@@ -486,10 +517,15 @@ class ExactObjectType : public TypeInfo {
   /// Contains all fields in this exact object.
   llvh::SmallDenseMap<Identifier, size_t, 4> fieldNameMap_{};
 
+  /// The optional index signature. When set, fields_ is empty.
+  OptValue<Indexer> indexer_;
+
  public:
   /// Initialize a new instance.
-  explicit ExactObjectType(llvh::ArrayRef<Field> fields)
-      : TypeInfo(TypeKind::ExactObject) {
+  explicit ExactObjectType(
+      llvh::ArrayRef<Field> fields,
+      OptValue<Indexer> indexer = llvh::None)
+      : TypeInfo(TypeKind::ExactObject), indexer_(indexer) {
     // Populate the fields_.
     fields_.append(fields.begin(), fields.end());
 
@@ -504,6 +540,16 @@ class ExactObjectType : public TypeInfo {
   /// \return the fields in order.
   llvh::ArrayRef<Field> getFields() const {
     return fields_;
+  }
+
+  /// \return the index signature, None if there isn't one.
+  const OptValue<Indexer> &getIndexer() const {
+    return indexer_;
+  }
+
+  /// \return true if this object has an index signature.
+  bool hasIndexer() const {
+    return indexer_.hasValue();
   }
 
   /// \return the field index for the given identifier, None if not found.
@@ -553,6 +599,10 @@ class TypedFunctionType : public BaseFunctionType {
     Type *type;
     /// Whether the parameter was declared as optional.
     bool optional;
+    /// Whether this is a rest parameter (...args).
+    /// Rest parameter MUST be the last parameter in params_.
+    /// There is at most one rest parameter.
+    bool rest = false;
   };
 
  private:
@@ -715,6 +765,8 @@ class ClassType : public TypeWithId {
     const Identifier name;
     /// The type of the field. For accessor fields, this is the getter's
     /// return type (or Void for setter-only).
+    /// For overloaded methods this is null; per-overload types are stored in
+    /// \c overloads. See \c isOverloaded().
     Type *type;
     /// The slot for PrLoad and PrStore, used during IRGen.
     /// This ideally should be computed during conversion to IR Type,
@@ -723,6 +775,8 @@ class ClassType : public TypeWithId {
     /// private methods).
     const OptValue<size_t> layoutSlotIR;
     /// If the field is a method, AST for the method (getter for accessors).
+    /// For overloaded methods this is null; per-overload method nodes are
+    /// stored in \c overloads. See \c isOverloaded().
     ESTree::MethodDefinitionNode *method;
     /// The key AST node for static fields/methods that use variables instead
     /// of layout slots. Used to propagate the Decl to member access sites.
@@ -751,6 +805,17 @@ class ClassType : public TypeWithId {
     /// Whether this is a private field for this class.
     bool isPrivate;
 
+    /// All overloads for overloaded methods, mapping method AST node to its
+    /// type. For non-overloaded methods, this is empty and the existing
+    /// \c type and \c method fields are used. For overloaded methods, ALL
+    /// overload entries are stored here and \c type and \c method are null.
+    llvh::MapVector<ESTree::MethodDefinitionNode *, Type *> overloads;
+
+    /// Whether this field is an overloaded method.
+    bool isOverloaded() const {
+      return !overloads.empty();
+    }
+
     Field(
         Identifier name,
         Type *type,
@@ -774,7 +839,7 @@ class ClassType : public TypeWithId {
           isPrivate(isPrivate) {}
 
     bool isMethod() const {
-      return method != nullptr || setterMethod != nullptr;
+      return method != nullptr || setterMethod != nullptr || isOverloaded();
     }
 
     /// Whether this field is an accessor (getter and/or setter).
@@ -1171,8 +1236,9 @@ class FlowContext {
     return &allocTuple_.emplace_back(types);
   }
   ExactObjectType *createExactObject(
-      llvh::ArrayRef<ExactObjectType::Field> fields) {
-    return &allocExactObject_.emplace_back(fields);
+      llvh::ArrayRef<ExactObjectType::Field> fields,
+      OptValue<ExactObjectType::Indexer> indexer = llvh::None) {
+    return &allocExactObject_.emplace_back(fields, indexer);
   }
   TypedFunctionType *createFunction(
       Type *returnType,

@@ -1,6 +1,6 @@
 # Hermes Parser JS Packages
 
-This directory contains the JavaScript packages for the Hermes parser: `hermes-estree`, `hermes-parser`, `hermes-transform`, `hermes-eslint`, `flow-api-translator`, and `babel-plugin-syntax-hermes-parser`.
+This directory contains the JavaScript packages for the Hermes parser: `hermes-estree`, `hermes-parser`, `hermes-transform`, `hermes-eslint`, and `babel-plugin-syntax-hermes-parser`.
 
 ## Prerequisites
 
@@ -15,29 +15,40 @@ mkdir -p xplat/static_h/tools/hermes-parser/js/hermes-parser/dist
 cp <output_path_from_step_1> xplat/static_h/tools/hermes-parser/js/hermes-parser/dist/HermesParserWASM.js
 ```
 
+## CI / Dev Workflow
+
+CI runs these 4 commands in sequence from this directory. Remember to run them locally:
+
+```bash
+yarn build                  # builds all packages (required before lint)
+yarn test                   # runs all jest tests
+yarn flow                   # Flow type checking
+yarn lint                   # eslint
+```
+
 ## Running Tests
 
-Use `js1 jest` from the fbsource root with `--config` pointing to this directory's jest config:
+From this directory:
+
+```bash
+yarn install   # first time only
+yarn test [<pattern>]
+```
+
+Alternatively, from the fbsource root:
 
 ```bash
 NODE_OPTIONS="--experimental-vm-modules" js1 jest \
   --config xplat/static_h/tools/hermes-parser/js/jest.config.js \
-  "<test-pattern>"
+  [<pattern>]
 ```
+
+If one command fails, try the other.
 
 ### Common test patterns
 
 | Pattern | What it runs |
 |---------|-------------|
-| `flowDefToTSDef-test` | flow-api-translator: Flow → TypeScript |
-| `TSDefToFlowDef-test` | flow-api-translator: TypeScript → Flow |
-| `flowToFlowDef-test` | flow-api-translator: Flow → Flow definitions |
 | `TypeAnnotations-test` | hermes-parser: type annotation parsing |
 | `ClassProperty-test` | hermes-parser: class property parsing |
 | `ObjectProperty-test` | hermes-parser: object property parsing |
-
-### Notes
-
-- `NODE_OPTIONS="--experimental-vm-modules"` is required — without it, prettier's dynamic import fails.
-- `--config` is required — without it, `js1 jest` searches from the repo root and finds nothing.
-- If tests fail with "Cannot find module HermesParserWASM", the WASM parser hasn't been built (see Prerequisites).

@@ -340,6 +340,8 @@ class JSParserImpl {
   UniqueString *underscoreIdent_;
 
   UniqueString *recordIdent_;
+  UniqueString *writeonlyIdent_;
+  UniqueString *outIdent_;
 #endif
 
 #if HERMES_PARSE_FLOW || HERMES_PARSE_TS
@@ -1658,12 +1660,20 @@ class JSParserImpl {
   }
 #endif
 
-  /// Check if the given token kind can follow the \c readonly modifier in Flow
-  /// mode. This is used to disambiguate \c readonly as a variance annotation
-  /// from \c readonly as a property name.
-  static bool canFollowReadonlyModifierFlow(OptValue<TokenKind> optTokenKind) {
+  /// Check if the given token kind can follow a contextual variance keyword
+  /// (\c readonly or \c writeonly) in Flow mode. Used to disambiguate the
+  /// keyword as a variance annotation from the keyword used as a property name.
+  static bool canFollowVarianceKeywordFlow(OptValue<TokenKind> optTokenKind) {
     if (!optTokenKind.hasValue()) {
       return false;
+    }
+    // Reserved words (e.g. `with`, `enum`, `default`, `new`) are valid
+    // property names, so `readonly <reservedWord>:` should be parsed as a
+    // variance modifier on a reserved-word property — the same way
+    // `+<reservedWord>:` already is.
+    if (*optTokenKind > TokenKind::_first_resword &&
+        *optTokenKind < TokenKind::_last_resword) {
+      return true;
     }
     switch (*optTokenKind) {
       case TokenKind::identifier:
